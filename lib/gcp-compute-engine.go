@@ -12,6 +12,7 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
 
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/monitoring/v3"
 
 	mp "github.com/mackerelio/go-mackerel-plugin-helper"
@@ -26,7 +27,7 @@ type ComputeEnginePlugin struct {
 	Project           string
 	InstanceName      string
 	MonitoringService *monitoring.Service
-	Option            *Option
+	Options           []Option
 	Tempfile          string
 }
 
@@ -101,8 +102,12 @@ func (p ComputeEnginePlugin) GraphDefinition() map[string]mp.Graphs {
 	return graphdef
 }
 
-func getLatestValue(listCall *monitoring.ProjectsTimeSeriesListCall, filter string, startTime string, endTime string, opts *Option) (interface{}, error) {
-	res, err := listCall.Filter(filter).IntervalEndTime(endTime).IntervalStartTime(startTime).Do(*opts)
+func getLatestValue(listCall *monitoring.ProjectsTimeSeriesListCall, filter string, startTime string, endTime string, opts ...Option) (interface{}, error) {
+	callOptions := make([]googleapi.CallOption, len(opts))
+	for i, opt := range opts {
+		callOptions[i] = opt
+	}
+	res, err := listCall.Filter(filter).IntervalEndTime(endTime).IntervalStartTime(startTime).Do(callOptions...)
 
 	if err != nil || res == nil {
 		return 0, err
@@ -160,7 +165,7 @@ func (p ComputeEnginePlugin) FetchMetrics() (map[string]interface{}, error) {
 		"/instance/network/sent_bytes_count",
 		"/instance/network/sent_packets_count",
 	} {
-		value, err := getLatestValue(listCall, mkFilter(computeDomain, metricName, p.InstanceName), formattedStart, formattedEnd, p.Option)
+		value, err := getLatestValue(listCall, mkFilter(computeDomain, metricName, p.InstanceName), formattedStart, formattedEnd, p.Options...)
 		if err != nil {
 			log.Printf("Failed to fetch a datapoint for %s: %s\n", metricName, err)
 			continue
@@ -223,10 +228,6 @@ func Do() {
 
 	flag.Parse()
 
-	if *optAPIKey == "" {
-		log.Fatalln("-api-key is required")
-	}
-
 	// Auto detect projectID/instanceName unless specified
 	projectID := *optProject
 	instanceName := *optInstanceName
@@ -257,7 +258,10 @@ func Do() {
 		MonitoringService: service,
 		Project:           "projects/" + projectID,
 		InstanceName:      instanceName,
-		Option:            &Option{Key: *optAPIKey},
+		Options:           []Option{},
+	}
+	if apiKey := *optAPIKey; apiKey != "" {
+		computeEngine.Options = append(computeEngine.Options, Option{Key: apiKey})
 	}
 
 	helper := mp.NewMackerelPlugin(computeEngine)
