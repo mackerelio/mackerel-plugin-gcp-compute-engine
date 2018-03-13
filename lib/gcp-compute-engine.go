@@ -12,8 +12,9 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
 
-	"google.golang.org/api/googleapi"
 	"google.golang.org/api/monitoring/v3"
+	"google.golang.org/api/option"
+	ghttp "google.golang.org/api/transport/http"
 
 	mp "github.com/mackerelio/go-mackerel-plugin-helper"
 )
@@ -27,18 +28,7 @@ type ComputeEnginePlugin struct {
 	Project           string
 	InstanceName      string
 	MonitoringService *monitoring.Service
-	Options           []Option
 	Tempfile          string
-}
-
-// Option is optional argument to an API call
-type Option struct {
-	Key string
-}
-
-// Get returns key and value
-func (c Option) Get() (string, string) {
-	return "key", c.Key
 }
 
 var graphdef = map[string]mp.Graphs{
@@ -102,12 +92,8 @@ func (p ComputeEnginePlugin) GraphDefinition() map[string]mp.Graphs {
 	return graphdef
 }
 
-func getLatestValue(listCall *monitoring.ProjectsTimeSeriesListCall, filter string, startTime string, endTime string, opts ...Option) (interface{}, error) {
-	callOptions := make([]googleapi.CallOption, len(opts))
-	for i, opt := range opts {
-		callOptions[i] = opt
-	}
-	res, err := listCall.Filter(filter).IntervalEndTime(endTime).IntervalStartTime(startTime).Do(callOptions...)
+func getLatestValue(listCall *monitoring.ProjectsTimeSeriesListCall, filter string, startTime string, endTime string) (interface{}, error) {
+	res, err := listCall.Filter(filter).IntervalEndTime(endTime).IntervalStartTime(startTime).Do()
 
 	if err != nil || res == nil {
 		return 0, err
@@ -165,7 +151,7 @@ func (p ComputeEnginePlugin) FetchMetrics() (map[string]interface{}, error) {
 		"/instance/network/sent_bytes_count",
 		"/instance/network/sent_packets_count",
 	} {
-		value, err := getLatestValue(listCall, mkFilter(computeDomain, metricName, p.InstanceName), formattedStart, formattedEnd, p.Options...)
+		value, err := getLatestValue(listCall, mkFilter(computeDomain, metricName, p.InstanceName), formattedStart, formattedEnd)
 		if err != nil {
 			log.Printf("Failed to fetch a datapoint for %s: %s\n", metricName, err)
 			continue
@@ -218,6 +204,15 @@ func getInstanceName() string {
 	return strings.Split(hostName, ".")[0]
 }
 
+func getGoogleClient(ctx context.Context, apiKey string) (*http.Client, error) {
+	if apiKey == "" {
+		return google.DefaultClient(ctx, monitoring.MonitoringReadScope)
+	}
+
+	client, _, err := ghttp.NewClient(ctx, option.WithAPIKey(apiKey))
+	return client, err
+}
+
 // Do the plugin
 func Do() {
 	optProject := flag.String("project", "", "Project Identifier (Name or ID)")
@@ -244,9 +239,9 @@ func Do() {
 
 	ctx := context.Background()
 
-	client, err := google.DefaultClient(ctx, monitoring.CloudPlatformScope)
+	client, err := getGoogleClient(ctx, *optAPIKey)
 	if err != nil {
-		log.Fatalln("Error while preparing Google OAuth client:", err)
+		log.Fatalln("Error while preparing Google OAuth Client:", err)
 	}
 
 	service, err := monitoring.New(client)
@@ -258,10 +253,6 @@ func Do() {
 		MonitoringService: service,
 		Project:           "projects/" + projectID,
 		InstanceName:      instanceName,
-		Options:           []Option{},
-	}
-	if apiKey := *optAPIKey; apiKey != "" {
-		computeEngine.Options = append(computeEngine.Options, Option{Key: apiKey})
 	}
 
 	helper := mp.NewMackerelPlugin(computeEngine)
