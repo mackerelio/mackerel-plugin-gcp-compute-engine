@@ -147,24 +147,35 @@ func (p ComputeEnginePlugin) FetchMetrics() (map[string]interface{}, error) {
 	listCall := p.MonitoringService.Projects.TimeSeries.List(p.Project)
 
 	stat := map[string]interface{}{}
-	for _, metricName := range []string{
-		"/firewall/dropped_bytes_count",
-		"/firewall/dropped_packets_count",
-		"/instance/cpu/utilization",
-		"/instance/disk/read_bytes_count",
-		"/instance/disk/read_ops_count",
-		"/instance/disk/write_bytes_count",
-		"/instance/disk/write_ops_count",
-		"/instance/network/received_bytes_count",
-		"/instance/network/received_packets_count",
-		"/instance/network/sent_bytes_count",
-		"/instance/network/sent_packets_count",
+	for metricName, ratio := range map[string]uint64{
+		"/firewall/dropped_bytes_count":            1,
+		"/firewall/dropped_packets_count":          1,
+		"/instance/cpu/utilization":                100,
+		"/instance/disk/read_bytes_count":          1,
+		"/instance/disk/read_ops_count":            1,
+		"/instance/disk/write_bytes_count":         1,
+		"/instance/disk/write_ops_count":           1,
+		"/instance/network/received_bytes_count":   1,
+		"/instance/network/received_packets_count": 1,
+		"/instance/network/sent_bytes_count":       1,
+		"/instance/network/sent_packets_count":     1,
 	} {
 		value, err := getLatestValue(listCall, mkFilter(computeDomain, metricName, p.InstanceName), formattedStart, formattedEnd, p.Option)
 		if err != nil {
 			log.Printf("Failed to fetch a datapoint for %s: %s\n", metricName, err)
 			continue
 		}
+
+		// adjust metric value by ratio
+		if ratio != 1 {
+			switch v := value.(type) {
+			case uint64:
+				value = v * ratio
+			case float64:
+				value = v * float64(ratio)
+			}
+		}
+
 		splited := strings.Split(metricName, "/")
 		stat[splited[len(splited)-1]] = value
 	}
