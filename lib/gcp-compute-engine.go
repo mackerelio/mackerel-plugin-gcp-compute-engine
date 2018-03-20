@@ -59,7 +59,7 @@ var graphdef = map[string]mp.Graphs{
 		Label: "CPU Utilization",
 		Unit:  "percentage",
 		Metrics: []mp.Metrics{
-			{Name: "utilization", Label: "Utilization"},
+			{Name: "utilization", Label: "Utilization", Scale: 100},
 		},
 	},
 	"Disk.BytesCount": mp.Graphs{
